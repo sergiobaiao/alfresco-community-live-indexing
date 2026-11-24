@@ -110,3 +110,41 @@ watermark document.
 Design artifacts are in [specs/001-live-indexing/](specs/001-live-indexing/): spec, plan, research,
 data model, contracts, quickstart, and tasks. The constitution is in
 [.specify/memory/constitution.md](.specify/memory/constitution.md).
+
+## Contributing / agents
+
+Contributor and AI-agent guidance lives in [AGENTS.md](AGENTS.md); [CLAUDE.md](CLAUDE.md) imports it.
+Every change must update this README (including the log below) and AGENTS.md, in en-US.
+
+## Development log
+
+### 2026-11-24: Initial version (v0.1.0)
+
+- **Feasibility research:**
+  - Alfresco Community 26.2 replaced Solr with Alfresco Search Community, a polling batch indexer
+    with a 30 s cycle.
+  - Event-driven live indexing exists only in Enterprise.
+  - The upstream source is open (LGPL-3.0) in
+    [Alfresco/alfresco-community-search](https://github.com/Alfresco/alfresco-community-search).
+- **Spec Kit:** the full Spec Kit flow ran (constitution → spec → plan → tasks → implement); the
+  artifacts are in `specs/001-live-indexing/`.
+- **Implementation:**
+  - JMS listener on `alfresco.repo.event2`, with a 1 s dedup window.
+  - The upstream pipeline is reused via an explicit-id `liveIndex` job.
+  - `alfresco.reindex.jobName=liveIndex` keeps the service away from the batch watermark.
+- **E2E findings, fixed:**
+  - Community emits no permission events, so ACL changes are polled from `alf_acl_change_set`.
+  - The ACS 26.2.0 query path still returns 5.10 soft-deleted docs, so trashcan deletes are hard
+    deletes (`live.hard-delete-archived`).
+  - The config moved to `config/application.properties` so the upstream defaults still load.
+- **Validation:** done on a local Docker stack (ACS 26.2.0, OpenSearch 2.11.1, batch indexer 5.7.1
+  alongside):
+
+  | Change | Visible in index |
+  |--------|------------------|
+  | Create | 0.45 s |
+  | Update | 0.47 s |
+  | ACL change | 1.03 s |
+  | Delete | 0.43 s |
+
+- **Docs:** added AGENTS.md and CLAUDE.md, plus this log.
