@@ -1,0 +1,7 @@
+.git/
+.claude/
+.specify/
+specs/
+src/
+*.log*
+.env*

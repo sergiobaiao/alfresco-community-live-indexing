@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.1.1</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>org.acs</groupId>
+    <artifactId>alfresco-community-live-indexing</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <name>Alfresco Community Live Indexing</name>
+    <description>Event-driven live indexing for Alfresco Community, reusing Alfresco Search Community libraries</description>
+
+    <properties>
+        <java.version>17</java.version>
+        <!-- Pinned: alpha upstream API, re-verify the index contract on every bump -->
+        <alfresco.search.community.version>5.10.0-A.5</alfresco.search.community.version>
+    </properties>
+
+    <repositories>
+        <!-- artifacts.hyland.dev answers 402 anonymously; Nexus public serves the same artifacts -->
+        <repository>
+            <id>alfresco-public</id>
+            <url>https://maven.alfresco.com/nexus/repository/public</url>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
+    </repositories>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.alfresco</groupId>
+            <artifactId>alfresco-elasticsearch-batch-indexing</artifactId>
+            <version>${alfresco.search.community.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-activemq</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>
