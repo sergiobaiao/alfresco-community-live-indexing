@@ -148,3 +148,62 @@ Every change must update this README (including the log below) and AGENTS.md, in
   | Delete | 0.43 s |
 
 - **Docs:** added AGENTS.md and CLAUDE.md, plus this log.
+
+### 2026-11-24: Production readiness assessment (read-only, nothing changed)
+
+The production VM was inspected over SSH; no files, containers or data were modified. Verdict:
+**not safe to enable against the live `alfresco` index yet.** The main risks, in order:
+
+1. **OpenSearch memory headroom:** the 2 GiB container is at about 1.77 GiB, and an operator monitor
+   is already watching for OOM. Another bulk writer can tip it over.
+2. **Index format version skew:**
+   - Production indexes with batch indexer 5.7.0; this service uses the 5.10.0-A.5 libraries.
+   - Documents for the same node could differ (soft-delete/archive fields).
+   - Production runs OpenSearch 2.19.7, while validation ran on 2.11.1.
+3. **Overlap with existing ACL work:**
+   - The custom `alfresco-aclsync` module and a second batch indexer already handle ACL changes.
+   - This service's ACL poll would add a third writer for `READER`/`DENIED`.
+4. **Concurrent changes:** other operators/agents were actively changing the stack during the
+   assessment.
+5. **Other:**
+   - Custom model namespaces need a complete prefix map, or nodes are silently skipped.
+   - The DB user is not read-only.
+
+Recommended path: run it as a shadow first (see AGENTS.md, "Target production environment").
+
+### 2026-11-24: Production shadow deployment
+
+- **OpenSearch limits raised:** container memory 2 GiB → 4 GiB and heap 1 GiB → 2 GiB, with user
+  approval.
+  - Only the `opensearch` container was recreated. The cluster was back to green in about 35 s
+    with all 454,606 docs.
+  - Compose backup: `docker-compose.yml.bak-pre-os4g-20261124-105209`.
+- **Shadow deployed:** `docker/compose.prod-shadow.yml`.
+  - It writes only to `alfresco-live-shadow`, which was created with the production mapping and
+    analyzers.
+  - Content indexing is off and soft deletes are kept. The live `alfresco` index and the official
+    batch indexer are untouched.
+- **New tool:** `tools/compare_shadow.py` compares shadow documents with the production index field by
+  field.
+- **Status:** the broker publishes `alfresco.repo.event2` and the shadow is subscribed, but there was no
+  repository activity in the first minutes, so no documents have been compared yet.
+
+### 2026-11-24: Shadow comparison on real production traffic
+
+About 15 minutes of real user activity: 165 events, 113 node reindexes, 0 failures, empty dead letter.
+Shadow memory use is about 300 MiB.
+
+- **Result:** 367 of 368 shadow documents are identical to the production index
+  (`IGNORE_CONTENT=1 tools/compare_shadow.py`; timing fields ignored, lists compared as sets).
+- **The one difference** is the `PATH` of the `admin` person node. Batch 5.7.0 writes an unresolved
+  `null:GROUP_SITE_CREATORS` segment, while the 5.10 libraries omit the prefix. It does not affect
+  document search.
+- **Latency:** newly uploaded files appeared in the shadow before the batch indexer had picked them
+  up (batch lag ≈ 15 s or more). The comparison script reports them as "missing in main" until the
+  batch catches up.
+- **Pre-existing production issue found:** `batch-indexer-os` logs
+  `impossible to get prefixed name of title / iptcxmpAspect / creator`. The IPTC/XMP namespaces are
+  missing from its default prefix map, so those aspect properties are not indexed. This is the known
+  prefix-map gap in the upstream guide.
+- **Script fixes:** `compare_shadow.py` now ignores `reindexingStartTime`, compares lists without
+  order (READER order differs between versions), and supports `IGNORE_CONTENT=1`.

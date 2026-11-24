@@ -69,6 +69,69 @@ Source of truth for requirements and design: `specs/001-live-indexing/` (Spec Ki
   - On this dev machine, host port 8080 is taken by another service; call ACS via
     `docker exec docker-alfresco-1 curl ...`.
 
+## Target production environment (assessed 2026-11-24, read-only)
+
+The production ACS runs in a Docker Compose project in `/var/alfresco` on the Alfresco VM. Access it
+over SSH with the host alias from the operator's `~/.ssh/config`. Facts that matter for this service:
+
+- **Stack versions:**
+  - ACS Community 26.2.0, Share 26.2.1, Postgres 17.9.
+  - ActiveMQ 6.2.6; the repo is wired to the broker.
+  - OpenSearch **2.19.7**, not the 2.11.1 we validated on.
+- **Writers already in the `alfresco` index (454k docs):**
+  - `batch-indexer-os`: official batch indexer **5.7.0**, 15 s polling.
+  - `batch-indexer-aclsync`: a second 5.7.0 instance. Metadata+path only, with its own watermark
+    `alfresco-reindex-state-aclsync`; it is used for ACL backfill.
+  - `alfresco-aclsync`: a custom ACS module (`/var/alfresco/alfresco-aclsync`). It polls
+    `alf_acl_change_set` and partially updates `READER`/`DENIED`. At assessment time it was
+    `enabled=true`, `dry-run=true`.
+- **OpenSearch is memory-bound:** a 2 GiB container limit with a 1 GiB heap, measured at
+  1.77 GiB / 67% heap. An operator monitor alerts at 1894 MiB.
+- **Custom content model:** `pge-norma-model.xml`. The upstream indexer needs a complete prefix map
+  for custom namespaces.
+- **Other agents/operators work on this host concurrently.** Check `ps`/`docker ps` before changing
+  anything there.
+
+Shadow deployment (running since 2026-11-24):
+
+- **Location and network:**
+  - Lives in `/var/alfresco/live-indexing/`: `compose.prod-shadow.yml`, `Dockerfile`, `target/*.jar`,
+    `compare_shadow.py`, and a `.env` (mode 600).
+  - The `.env` is generated on the host from the running `batch-indexer-os`/`activemq` container
+    env. Never copy it out.
+  - The container `live-indexing-shadow` sits on external network `alfresco` at fixed IP
+    `172.20.1.60`. The network uses fixed IPs, so pick a free one.
+- **Writes only to these indices:**
+  - `alfresco-live-shadow`, created with `alfresco`'s mapping/analysis cloned and
+    `number_of_replicas=0`;
+  - `alfresco-reindex-dead-letter-live-shadow`.
+- **Settings:** content indexing is off, and `live.hard-delete-archived=false`.
+- **Replicas:** OpenSearch is a single node. Any index created with explicit settings MUST use
+  `number_of_replicas: 0`, or the cluster turns yellow. The operator added the index template
+  `alfresco-single-node-replicas` for `alfresco-reindex-*` and `alfresco-live-*`.
+- **Compare:**
+  `IGNORE_CONTENT=1 python3 /var/alfresco/live-indexing/compare_shadow.py http://172.20.1.29:9200`.
+  - It ignores timing fields and compares lists as sets, because READER order differs between 5.7
+    and 5.10.
+  - "Missing in main" right after an upload is batch lag; re-run after about 1 min.
+  - Known benign diff: batch 5.7.0 writes unresolved `null:` path segments (e.g.
+    `null:GROUP_SITE_CREATORS`), while 5.10 omits the prefix.
+- **Do not leave helper images on the host.** Remove anything pulled only for diagnostics
+  (e.g. `curlimages/curl`).
+- **Rollback:**
+  1. `docker compose -f compose.prod-shadow.yml down`
+  2. `DELETE alfresco-live-shadow` and `DELETE alfresco-reindex-dead-letter-live-shadow`
+- **Coordination:** the operator session "Migração Alfresco" owns OpenSearch and indexing on this host.
+  Tell it before changing anything that writes to `alfresco`.
+
+Rules for any production test:
+
+1. Shadow first: `elasticsearch.indexName=<separate index>`, `alfresco.reindex.contentIndexingEnabled=false`,
+   and `live.hard-delete-archived=false`.
+2. Compare shadow docs with `alfresco` field by field before writing to `alfresco`.
+3. Never run in production without the operator's explicit go-ahead and an agreed rollback (stop the
+   container).
+
 ## Build and verify
 
 ```bash

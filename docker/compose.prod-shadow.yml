@@ -1,0 +1,42 @@
+# Production SHADOW run: joins an existing ACS stack's network and writes to a separate index, so the
+# live `alfresco` index and the official batch indexer are untouched. Secrets come from ./.env
+# (generated on the host, never committed). See AGENTS.md "Target production environment".
+#
+#   docker compose -f compose.prod-shadow.yml up -d --build    # start
+#   docker compose -f compose.prod-shadow.yml down             # rollback
+services:
+  live-indexing-shadow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: live-indexing-shadow
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    environment:
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75"
+      SPRING_ACTIVEMQ_BROKER_URL: tcp://activemq:61616
+      SPRING_ACTIVEMQ_USER: ${BROKER_USER}
+      SPRING_ACTIVEMQ_PASSWORD: ${BROKER_PASSWORD}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/alfresco
+      SPRING_DATASOURCE_USERNAME: ${DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE: "5"
+      SPRING_ELASTICSEARCH_URIS: http://opensearch:9200
+      ELASTICSEARCH_INDEXNAME: alfresco-live-shadow
+      ALFRESCO_REINDEX_DEADLETTER_INDEXNAME: alfresco-reindex-dead-letter-live-shadow
+      ALFRESCO_REINDEX_CONTENTINDEXINGENABLED: "false"
+      ALFRESCO_REINDEX_CONCURRENTPROCESSORS: "1"
+      LIVE_HARDDELETEARCHIVED: "false"
+      ALFRESCO_ACS_URL: http://alfresco:8080
+      ALFRESCO_ACCEPTEDCONTENTMEDIATYPESCACHE_BASEURL: http://transform-core-aio:8090/transform/config
+      ALFRESCO_CONTENT_TRANSFORM_SHAREDSECRET: ${SHARED_SECRET}
+    networks:
+      alfresco:
+        ipv4_address: ${SHADOW_IP:-172.20.1.60}
+
+networks:
+  alfresco:
+    external: true
